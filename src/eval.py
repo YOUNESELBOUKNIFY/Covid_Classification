@@ -3,9 +3,9 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from dataset import COVIDDataset, load_data_from_directory
-from models import create_model
-from utils import (
+from src.dataset import COVIDDataset, load_data_from_directory
+from src.models import create_model
+from src.utils import (
     set_seed, get_device, split_dataset, compute_metrics,
     get_confusion_matrix, get_classification_report
 )
