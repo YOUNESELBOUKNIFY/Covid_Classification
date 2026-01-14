@@ -103,7 +103,13 @@ def train(args):
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
     
     # Create model
-    model = create_model(args.model, num_classes=2)
+    model = create_model(
+    args.model,
+    num_classes=2,
+    hidden_dim=args.hidden_dim,
+    dropout=args.dropout,
+    img_size=args.img_size,
+    freeze_backbone=False,)
     model = model.to(device)
     
     # Count parameters
@@ -186,7 +192,16 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train COVID classifier')
     parser.add_argument('--data_root', type=str, default='./data', help='Root directory of dataset')
     parser.add_argument('--modality', type=str, default='ct', choices=['ct', 'xray'], help='Imaging modality')
-    parser.add_argument('--model', type=str, default='cnn', choices=['cnn', 'vgg16', 'vit'], help='Model type')
+    parser.add_argument(
+    '--model',
+    type=str,
+    default='cnn',
+    choices=['cnn', 'vgg16_scratch', 'vit1', 'vit2'],   # <-- scratch only
+    help='Model type'
+)
+
+    parser.add_argument('--hidden_dim', type=int, default=256, help='Hidden dim in classification head')
+    parser.add_argument('--dropout', type=float, default=0.5, help='Dropout in classification head')
     parser.add_argument('--epochs', type=int, default=10, help='Number of epochs')
     parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
