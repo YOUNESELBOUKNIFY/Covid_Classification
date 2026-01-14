@@ -1,19 +1,19 @@
 import torch
 import torch.nn as nn
-import torchvision.models as models
+from torchvision import models
 
 
 class ClassificationHead(nn.Module):
-    """Unified classification head for all models."""
-    
+    """Unified classification head for all models: Linear -> ReLU -> Dropout -> Linear"""
+
     def __init__(self, input_dim: int, hidden_dim: int = 256, dropout: float = 0.5, num_classes: int = 2):
         super().__init__()
         self.fc1 = nn.Linear(input_dim, hidden_dim)
         self.relu = nn.ReLU(inplace=True)
         self.dropout = nn.Dropout(dropout)
         self.fc2 = nn.Linear(hidden_dim, num_classes)
-    
-    def forward(self, x):
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.fc1(x)
         x = self.relu(x)
         x = self.dropout(x)
@@ -22,139 +22,92 @@ class ClassificationHead(nn.Module):
 
 
 class CNNClassifier(nn.Module):
-    """Custom CNN classifier."""
-    
-    def __init__(self, num_classes: int = 2, hidden_dim: int = 256, dropout: float = 0.5):
+    def __init__(self, hidden_dim: int = 256, dropout: float = 0.5, num_classes: int = 2):
         super().__init__()
-        
-        # Feature extractor
         self.features = nn.Sequential(
-            # Block 1
-            nn.Conv2d(3, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, padding=1),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            
-            # Block 2
-            nn.Conv2d(64, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(128, 128, kernel_size=3, padding=1),
-            nn.BatchNorm2d(128),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            
-            # Block 3
-            nn.Conv2d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(256, 256, kernel_size=3, padding=1),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
-            
-            # Block 4
-            nn.Conv2d(256, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(512, 512, kernel_size=3, padding=1),
-            nn.BatchNorm2d(512),
-            nn.ReLU(inplace=True),
-            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(3, 32, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(32, 64, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(64, 128, 3, padding=1), nn.ReLU(), nn.MaxPool2d(2),
+            nn.Conv2d(128, 512, 3, padding=1), nn.ReLU(),
+            nn.AdaptiveAvgPool2d((1, 1)),  # -> (B,512,1,1)
         )
-        
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.head = ClassificationHead(512, hidden_dim, dropout, num_classes)
-    
-    def forward(self, x):
-        x = self.features(x)
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.head(x)
-        return x
+        self.head = ClassificationHead(input_dim=512, hidden_dim=hidden_dim, dropout=dropout, num_classes=num_classes)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.features(x)        # (B,512,1,1)
+        x = torch.flatten(x, 1)     # (B,512)
+        logits = self.head(x)       # (B,2)
+        return logits
 
 
 class VGG16Classifier(nn.Module):
-    """VGG16 classifier with transfer learning."""
-    
-    def __init__(self, num_classes: int = 2, hidden_dim: int = 256, dropout: float = 0.5, pretrained: bool = True):
+    def __init__(self, hidden_dim: int = 256, dropout: float = 0.5, num_classes: int = 2, freeze_backbone: bool = True):
         super().__init__()
-        
-        # Load pretrained VGG16
-        vgg16 = models.vgg16(weights='IMAGENET1K_V1' if pretrained else None)
-        
-        # Remove the classification head, keep only features
-        self.features = vgg16.features
-        self.avgpool = vgg16.avgpool
-        
-        # Replace classifier with custom head
-        self.head = ClassificationHead(512, hidden_dim, dropout, num_classes)
-    
-    def forward(self, x):
-        x = self.features(x)
-        x = self.avgpool(x)
-        x = torch.flatten(x, 1)
-        x = self.head(x)
-        return x
+
+        # VGG16 pretrained
+        vgg = models.vgg16(weights=models.VGG16_Weights.DEFAULT)
+
+        # dimension avant classifier (c'est 25088 pour input 224x224)
+        in_dim = vgg.classifier[0].in_features  # 25088
+
+        # enlever le classifier d'origine
+        vgg.classifier = nn.Identity()
+        self.backbone = vgg
+
+        # head unifiée
+        self.head = ClassificationHead(input_dim=in_dim, hidden_dim=hidden_dim, dropout=dropout, num_classes=num_classes)
+
+        if freeze_backbone:
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        feats = self.backbone(x)    # (B,25088)
+        logits = self.head(feats)   # (B,2)
+        return logits
 
 
 class ViTClassifier(nn.Module):
-    """Vision Transformer classifier with transfer learning."""
-    
-    def __init__(self, num_classes: int = 2, hidden_dim: int = 256, dropout: float = 0.5, pretrained: bool = True):
+    def __init__(self, hidden_dim: int = 256, dropout: float = 0.5, num_classes: int = 2, freeze_backbone: bool = True):
         super().__init__()
-        
-        # Load pretrained ViT
-        vit = models.vit_b_16(weights='IMAGENET1K_V1' if pretrained else None)
-        
-        # Extract feature extractor (everything except the head)
-        self.vit = vit
-        self.vit.heads = nn.Identity()  # Remove original head
-        
-        # Replace with custom head (ViT outputs 768 dimensions)
-        self.head = ClassificationHead(768, hidden_dim, dropout, num_classes)
-    
-    def forward(self, x):
-        # ViT forward pass
-        x = self.vit._process_input(x)
-        n, _, c = x.shape
-        
-        # Expand the class token to the full batch
-        batch_class_token = self.vit.class_token.expand(n, -1, -1)
-        x = torch.cat((batch_class_token, x), dim=1)
-        
-        x = self.vit.encoder(x)
-        x = x[:, 0]  # Get class token output
-        
-        x = self.head(x)
-        return x
+
+        vit = models.vit_b_16(weights=models.ViT_B_16_Weights.DEFAULT)
+
+        # dimension embedding ViT (768)
+        in_dim = vit.heads.head.in_features
+
+        # enlever la tête d'origine
+        vit.heads = nn.Identity()
+        self.backbone = vit
+
+        self.head = ClassificationHead(input_dim=in_dim, hidden_dim=hidden_dim, dropout=dropout, num_classes=num_classes)
+
+        if freeze_backbone:
+            for p in self.backbone.parameters():
+                p.requires_grad = False
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        feats = self.backbone(x)    # (B,768)
+        logits = self.head(feats)   # (B,2)
+        return logits
 
 
-def create_model(model_name: str, num_classes: int = 2, hidden_dim: int = 256, dropout: float = 0.5):
-    """
-    Create model by name.
-    
-    Args:
-        model_name: 'cnn', 'vgg16', or 'vit'
-        num_classes: Number of output classes
-        hidden_dim: Hidden dimension for classification head
-        dropout: Dropout rate
-    
-    Returns:
-        Model instance
-    """
-    model_name = model_name.lower()
-    
-    if model_name == 'cnn':
-        model = CNNClassifier(num_classes, hidden_dim, dropout)
-    elif model_name == 'vgg16':
-        model = VGG16Classifier(num_classes, hidden_dim, dropout, pretrained=True)
-    elif model_name == 'vit':
-        model = ViTClassifier(num_classes, hidden_dim, dropout, pretrained=True)
-    else:
-        raise ValueError(f"Unknown model: {model_name}")
-    
-    return model
+def create_model(
+    model_name: str,
+    num_classes: int = 2,
+    hidden_dim: int = 256,
+    dropout: float = 0.5,
+    freeze_backbone: bool = True,
+):
+    model_name = model_name.lower().strip()
+
+    if model_name == "cnn":
+        return CNNClassifier(hidden_dim=hidden_dim, dropout=dropout, num_classes=num_classes)
+
+    if model_name == "vgg16":
+        return VGG16Classifier(hidden_dim=hidden_dim, dropout=dropout, num_classes=num_classes, freeze_backbone=freeze_backbone)
+
+    if model_name == "vit":
+        return ViTClassifier(hidden_dim=hidden_dim, dropout=dropout, num_classes=num_classes, freeze_backbone=freeze_backbone)
+
+    raise ValueError(f"Unknown model: {model_name}. Choose from: cnn | vgg16 | vit")
