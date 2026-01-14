@@ -7,9 +7,9 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from dataset import COVIDDataset, load_data_from_directory
-from models import create_model
-from utils import set_seed, get_device, split_dataset, create_output_dir
+from src.dataset import COVIDDataset, load_data_from_directory
+from src.models import create_model
+from src.utils import set_seed, get_device, split_dataset, create_output_dir
 
 
 def train_epoch(model, train_loader, criterion, optimizer, device):
