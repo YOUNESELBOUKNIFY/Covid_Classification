@@ -4,9 +4,9 @@ import torch.nn.functional as F
 from PIL import Image
 from pathlib import Path
 
-from models import create_model
-from dataset import COVIDDataset
-from utils import get_device
+from src.models import create_model
+from src.dataset import COVIDDataset
+from src.utils import get_device
 
 
 def predict_image(model, image_path, img_size=224, device='cpu'):
